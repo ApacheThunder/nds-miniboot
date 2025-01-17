@@ -63,11 +63,23 @@ void displayReset(void) {
 
 void consoleInit(void) {
     if (displayInitialized) return;
+	
+	// Initialize VRAM (128KB to main engine, rest to CPU, 32KB WRAM to ARM7).
+    REG_VRAMCNT_ABCD = VRAMCNT_ABCD(0x81, 0x80, 0x82, 0x8A);
+    REG_VRAMCNT_EFGW = VRAMCNT_EFGW(0x80, 0x80, 0x80, 0x03);
+    REG_VRAMCNT_HI = VRAMCNT_HI(0x80, 0x80);
+
+    REG_POWCNT = POWCNT_LCD | POWCNT_2D_MAIN | POWCNT_DISPLAY_SWAP;
+    // Ensure ARM9 has control over the cartridge slots.
+    REG_EXMEMCNT = 0x6000; // ARM9 memory priority, ARM9 slot access, "slow" GBA timings
+
+    // Reset display.
+    displayReset();
 
     // Configure palette
-    MEM_PALETTE_BG[0] = RGB555(0, 0, 0);
-    MEM_PALETTE_BG[1] = RGB555(31, 31, 31);
-    MEM_PALETTE_BG[1 + (1 << 4)] = RGB555(16, 16, 16);
+    MEM_PALETTE_BG[0] = RGB555(31, 31, 31);
+    MEM_PALETTE_BG[1] = RGB555(0, 0, 0);
+    MEM_PALETTE_BG[1 + (1 << 4)] = RGB555(0, 0, 16);
 
     // Clear background map, tile 0.
     __ndsabi_wordset4(DISPLAY_TILES, 32, 0);
@@ -117,3 +129,4 @@ void consoleInit(void) {
     fontPalette = 0x0000;
     fontLimited = true;
 }
+

@@ -11,10 +11,12 @@
 #include "console.h"
 
 // #define DEBUG
+// #define DLDIPATCHING // DLDI patching disabled. Doesn't work correctly if booted as main rom of DSTT
 
 static FATFS fs;
 
 #define DLDI_BACKUP   ((DLDI_INTERFACE*) 0x6820000)
+
 
 /* === Error reporting === */
 
@@ -54,33 +56,28 @@ void ipc_arm7_cmd(uint32_t cmd) {
     while (last_sync == next_sync) next_sync = REG_IPCSYNC & 0xF;
 }
 
-const char *executable_path = "/BOOT.NDS";
+const char *executable_path = "/TTMENU.DAT";
 
 int main(void) {
     FIL fp;
     unsigned int bytes_read;
+#ifdef DLDIPATCHING
     int result;
+#endif
 
-    // Initialize VRAM (128KB to main engine, rest to CPU, 32KB WRAM to ARM7).
-    REG_VRAMCNT_ABCD = VRAMCNT_ABCD(0x81, 0x80, 0x82, 0x8A);
-    REG_VRAMCNT_EFGW = VRAMCNT_EFGW(0x80, 0x80, 0x80, 0x03);
-    REG_VRAMCNT_HI = VRAMCNT_HI(0x80, 0x80);
-
-    REG_POWCNT = POWCNT_LCD | POWCNT_2D_MAIN | POWCNT_DISPLAY_SWAP;
     // Ensure ARM9 has control over the cartridge slots.
     REG_EXMEMCNT = 0x6000; // ARM9 memory priority, ARM9 slot access, "slow" GBA timings
 
-    // Reset display.
-    displayReset();
-
+	consoleInit(); // Full console init must happen in order for DSTT to dldi init correctly when booted from DSi System Menu....no clue why this makes it work. :P
+	
     // If holding START while booting, or DEBUG is defined, enable 
     // debug output.
 #ifndef NDEBUG
-#ifdef DEBUG
+	#ifdef DEBUG
     debugEnabled = true;
-#else
+	#else
     debugEnabled = !(REG_KEYINPUT & KEY_START);
-#endif
+	#endif
 #endif
 
     dprintf("ARM7 sync");
@@ -111,17 +108,19 @@ int main(void) {
 
     // Create a copy of the DLDI driver in VRAM before initializing it.
     // We'll make use of this copy for patching the ARM9 binary later.
-    __aeabi_memcpy4(DLDI_BACKUP, &_io_dldi_stub, 16384);
+#ifdef DLDIPATCHING
+	__aeabi_memcpy4(DLDI_BACKUP, &_io_dldi_stub, 16384);
+#endif
 
-    // Mount the filesystem. Try to open BOOT.NDS.
+    // Mount the filesystem. Try to open TTMENU.DAT.
     dprintf("Mounting FAT filesystem... ");
     checkErrorFatFs("Could not mount FAT filesystem", f_mount(&fs, "", 1));
     dprintf("OK\n");
-    checkErrorFatFs("Could not find BOOT.NDS", f_open(&fp, executable_path, FA_READ));
-    dprintf("BOOT.NDS found.\n");
+    checkErrorFatFs("Could not find TTMENU.DAT", f_open(&fp, executable_path, FA_READ));
+    dprintf("TTMENU.DAT found.\n");
 
     // Read the .nds file header.
-    checkErrorFatFs("Could not read BOOT.NDS", f_read(&fp, NDS_HEADER, sizeof(nds_header_t), &bytes_read));
+    checkErrorFatFs("Could not read TTMENU.DAT", f_read(&fp, NDS_HEADER, sizeof(nds_header_t), &bytes_read));
 
     bool waiting_arm7 = false;
     // Load the ARM7 binary.
@@ -137,8 +136,8 @@ int main(void) {
             eprintf("Invalid ARM7 binary location."); while(1);
         }
 
-        checkErrorFatFs("Could not read BOOT.NDS", f_lseek(&fp, NDS_HEADER->arm7_offset));
-        checkErrorFatFs("Could not read BOOT.NDS", f_read(&fp, (void*) (in_arm7_ram ? 0x2000000 : NDS_HEADER->arm7_start), NDS_HEADER->arm7_size, &bytes_read));
+        checkErrorFatFs("Could not read TTMENU.DAT", f_lseek(&fp, NDS_HEADER->arm7_offset));
+        checkErrorFatFs("Could not read TTMENU.DAT", f_read(&fp, (void*) (in_arm7_ram ? 0x2000000 : NDS_HEADER->arm7_start), NDS_HEADER->arm7_size, &bytes_read));
 
         // If the ARM7 binary has to be relocated to ARM7 RAM, the ARM7 CPU
         // has to relocate it from main memory.
@@ -162,13 +161,14 @@ int main(void) {
             eprintf("Invalid ARM9 binary location."); while(1);
         }
 
-        checkErrorFatFs("Could not read BOOT.NDS", f_lseek(&fp, NDS_HEADER->arm9_offset));
+        checkErrorFatFs("Could not read TTMENU.DAT", f_lseek(&fp, NDS_HEADER->arm9_offset));
         if (waiting_arm7) {
             ipc_arm7_cmd(IPC_ARM7_NONE);
             waiting_arm7 = false;
         }
-        checkErrorFatFs("Could not read BOOT.NDS", f_read(&fp, (void*) NDS_HEADER->arm9_start, NDS_HEADER->arm9_size, &bytes_read));
+        checkErrorFatFs("Could not read TTMENU.DAT", f_read(&fp, (void*) NDS_HEADER->arm9_start, NDS_HEADER->arm9_size, &bytes_read));
 
+#ifdef DLDIPATCHING
         // Try to apply the DLDI driver patch.
         result = dldi_patch_relocate((void*) NDS_HEADER->arm9_start, NDS_HEADER->arm9_size, DLDI_BACKUP);
         if (result) {
@@ -178,6 +178,7 @@ int main(void) {
             }
             while(1);
         }
+#endif
     }
 
     // Set up argv.
@@ -201,3 +202,4 @@ int main(void) {
     // Start the ARM9 binary.
     swiSoftReset();
 }
+
