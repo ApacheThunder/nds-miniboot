@@ -4,6 +4,15 @@ Minimal flashcart bootstrap for NDS consoles. Loads `/BOOT.NDS` and
 papers over various device-specific quirks, allowing running 100%
 clean homebrew launchers on a variety of such devices.
 
+# changes from original version
+
+This version of nds-miniboot is modified to be used as a rom 
+replacement for DSTT and their clones. Requires a ntrboot 
+compatilbe DSTT or DSTT clone. This repo is not yet modified
+to build nds file that is directly compatiblee with the
+layout of the flash dump for DSTT. You will need to do this
+your self for now.
+
 ## Usage
 
 ### Installation
